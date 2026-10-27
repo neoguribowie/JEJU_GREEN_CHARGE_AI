@@ -1,0 +1,2 @@
+﻿experiment,train_years,test_year,precision,recall,f1,average_precision,TN,FP,FN,TP
+EXP-C003,2021-2022,2023,1.0,0.11478260869565217,0.2059282371294852,0.7846280918196187,8185,0,509,66
