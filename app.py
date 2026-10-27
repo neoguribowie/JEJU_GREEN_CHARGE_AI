@@ -1,4 +1,5 @@
 
+import textwrap
 import folium
 from streamlit_folium import st_folium
 from streamlit_geolocation import streamlit_geolocation
@@ -90,6 +91,30 @@ st.markdown("""
         font-size: 0.8rem;
         color: #668174;
     }
+
+    /* 모바일 버튼 가독성 */
+    div.stButton > button {
+        min-height: 46px;
+        border-radius: 12px;
+        font-weight: 600;
+    }
+
+    /* 안내 문구 줄 간격 */
+    .stAlert p {
+        line-height: 1.6;
+    }
+
+    /* 모바일 화면 */
+    @media (max-width: 600px) {
+        .gm-hero h2 {
+            font-size: 1.65rem;
+            line-height: 1.35;
+        }
+
+        .gm-hero p {
+            line-height: 1.65;
+        }
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -151,21 +176,101 @@ st.divider()
 # ====================================
 if page == "🏠 홈":
 
-    st.markdown("""
-    <div class="gm-hero">
-        <small>GREEN CHARGING IN JEJU</small>
-        <h2>낮에 충전하고 더 알뜰하게 제주를 즐겨요!</h2>
-        <p>
-            AI가 충전을 검토하기 좋은 시간과<br>
-            주변 급속충전소를 안내해 드려요.
-        </p>
-        <p style="font-size: 11px; opacity: 0.75;">
-            ※ 충전 할인은 현재 제공되는 혜택이 아닌
-            가상 시뮬레이션입니다.
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
 
+    st.markdown(
+        textwrap.dedent("""
+        <style>
+        .gm-home-card {
+            background: #ffffff;
+            border: 1px solid #e5e7eb;
+            border-radius: 18px;
+            padding: 20px 18px;
+            margin-bottom: 12px;
+        }
+        .gm-home-logo {
+            font-size: 14px;
+            color: #222;
+            margin-bottom: 18px;
+        }
+        .gm-home-title {
+            font-size: 27px;
+            font-weight: 750;
+            line-height: 1.32;
+            letter-spacing: -1px;
+            color: #202124;
+            margin-bottom: 14px;
+            word-break: keep-all;
+        }
+        .gm-home-description {
+            font-size: 13px;
+            line-height: 1.65;
+            color: #737373;
+            margin-bottom: 16px;
+            word-break: keep-all;
+        }
+        .gm-steps {
+            background: #f6f6f6;
+            border-radius: 14px;
+            padding: 15px 14px;
+        }
+        .gm-steps-label {
+            font-size: 12px;
+            color: #888;
+            margin-bottom: 12px;
+        }
+        .gm-step {
+            font-size: 13px;
+            font-weight: 600;
+            color: #303030;
+            margin-bottom: 11px;
+        }
+        .gm-step:last-child {
+            margin-bottom: 0;
+        }
+        .gm-home-note {
+            margin-top: 12px;
+            font-size: 11px;
+            color: #888;
+            line-height: 1.5;
+        }
+        @media (max-width: 600px) {
+            .gm-home-card { padding: 16px 14px; }
+            .gm-home-title { font-size: 25px; }
+        }
+        </style>
+        <div class="gm-home-card">
+            <div class="gm-home-logo">🌿 Green Match</div>
+            <div class="gm-home-title">
+                낮에 충전하고, 더 알뜰하게 제주를 즐겨요!
+            </div>
+            <div class="gm-home-description">
+                AI 분석으로 충전을 검토할 시간대를 확인하고,
+                여행지 주변 급속충전소를 찾아보세요.
+            </div>
+            <div class="gm-steps">
+                <div class="gm-steps-label">서비스 이용 순서</div>
+                <div class="gm-step">① 충전 날짜 확인</div>
+                <div class="gm-step">② AI 분석 시간대 확인</div>
+                <div class="gm-step">③ 주변 급속충전소 검색</div>
+                <div class="gm-step">④ 가상 할인 혜택 비교</div>
+            </div>
+            <div class="gm-home-note">
+                ※ 충전 할인은 현재 제공되는 혜택이 아닌
+                가상 시뮬레이션입니다.
+            </div>
+        </div>
+        """),
+        unsafe_allow_html=True
+    )
+
+
+    if st.button(
+        "🌱 AI 충전 시간 확인하기",
+        key="home_to_ai",
+        use_container_width=True
+    ):
+        st.session_state.page = "🌱 AI 충전 가이드"
+        st.rerun()
 
     st.subheader("📍 어디에서 충전할까요?")
 
@@ -327,7 +432,7 @@ elif page == "⚡ 충전소":
             "문제가 발생했습니다."
         )
         st.stop()
-        
+
     if nearby.empty:
         st.warning(
             "검색 범위에 사용 가능 상태의 "
@@ -356,6 +461,12 @@ elif page == "⚡ 충전소":
         # 추천 점수 계산 및 순위 정렬
         ranked = rank_charging_stations(
             stations, radius=radius
+        )
+
+        st.info(
+            "🔌 지금은 이용 가능한 충전기라도, "
+            "도착했을 때는 다른 사람이 사용 중일 수 있어요. "
+            "출발 전에 한 번 더 확인해 주세요!"
         )
 
         st.subheader("🌿 Green Match 추천 TOP 3")
@@ -663,6 +774,11 @@ elif page == "🌱 AI 충전 가이드":
                     "※ AI 분석은 참고 정보이며, "
                     "실제 잉여전력 발생이나 할인 혜택을 "
                     "보장하지 않습니다."
+                )
+
+                st.caption(
+                    "여행 일정에 맞는 시간대를 골랐다면, "
+                    "이제 가까운 급속충전소를 찾아보세요!"
                 )
 
                 if st.button(
