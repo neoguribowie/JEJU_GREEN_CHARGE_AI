@@ -17,11 +17,11 @@ from ai_dashboard import (
     render_model_comparison,
     render_future_risk_comparison,
 )
-
 from charger_demo import (
     save_charger_snapshot,
     load_charger_snapshot
 )
+from tourist_spots import TOURIST_SPOTS
 
 # ====================================
 # 기본 설정
@@ -274,48 +274,82 @@ if page == "🏠 홈":
 
     st.subheader("📍 어디에서 충전할까요?")
 
-    st.write("**① 내 현재 위치로 검색**")
-    st.caption("아래 위치 버튼을 누르고 브라우저 위치 권한을 허용하세요.")
-
-    location = streamlit_geolocation()
-
-    if isinstance(location, dict) and (
-        location.get("latitude") is not None
-        and location.get("longitude") is not None
-    ):
-        lat = float(location["latitude"])
-        lng = float(location["longitude"])
-
-        st.success("현재 위치를 확인했습니다.")
-
-        if st.button(
-            "⚡ 내 위치 주변 충전소 찾기",
-            type="primary"
-        ):
-            st.session_state.search_location = (lat, lng)
-            st.session_state.search_name = "현재 위치"
-            st.session_state.page = "⚡ 충전소"
-            st.rerun()
-
-    
-    st.write("**② 제주 지역을 선택해서 검색**")
-
-    region = st.selectbox(
-        "제주 지역 선택",
-        list(REGIONS.keys()),
-        key="selected_region_input"
+    home_mode = st.radio(
+        "위치 선택 방법",
+        ["관광지 선택", "지역 선택", "현재 위치"],
+        horizontal=True,
+        key="home_search_mode"
     )
 
-    if st.button(
-        "선택한 지역에서 충전소 찾기",
-        key="search_region_button",
-        use_container_width=True
-    ):
-        st.session_state.search_location = REGIONS[region]
-        st.session_state.search_name = region
-        st.session_state.page = "⚡ 충전소"
-        st.rerun()
+    if home_mode == "관광지 선택":
+        home_spot = st.selectbox(
+            "방문할 관광지",
+            list(TOURIST_SPOTS.keys()),
+            index=None,
+            placeholder="관광지를 선택해주세요",
+            key="home_tourist_spot"
+        )
+        if st.button(
+            "⚡ 이 관광지 주변 충전소 찾기",
+            key="home_spot_search",
+            use_container_width=True,
+            type="primary"
+        ):
+            if home_spot is None:
+                st.warning("먼저 관광지를 선택해 주세요.")
+            else:
+                st.session_state.search_location = TOURIST_SPOTS[home_spot]
+                st.session_state.search_name = home_spot
+                st.session_state.charger_search_requested = True
+                st.session_state.page = "⚡ 충전소"
+                st.rerun()
 
+    elif home_mode == "지역 선택":
+        home_region = st.selectbox(
+            "제주 지역",
+            list(REGIONS.keys()),
+            index=None,
+            placeholder="지역을 선택해주세요",
+            key="home_region_select"
+        )
+        if st.button(
+            "⚡ 이 지역 주변 충전소 찾기",
+            key="home_region_search",
+            use_container_width=True,
+            type="primary"
+        ):
+            if home_region is None:
+                st.warning("먼저 지역을 선택해 주세요.")
+            else:
+                st.session_state.search_location = REGIONS[home_region]
+                st.session_state.search_name = home_region
+                st.session_state.charger_search_requested = True
+                st.session_state.page = "⚡ 충전소"
+                st.rerun()
+
+    else:
+        st.caption("아래 위치 버튼을 누르고 브라우저 위치 권한을 허용하세요.")
+        location = streamlit_geolocation()
+        if isinstance(location, dict) and (
+            location.get("latitude") is not None
+            and location.get("longitude") is not None
+        ):
+            gps_lat = float(location["latitude"])
+            gps_lng = float(location["longitude"])
+            st.success("현재 위치를 확인했습니다.")
+            if st.button(
+                "⚡ 내 위치 주변 충전소 찾기",
+                key="home_gps_search",
+                use_container_width=True,
+                type="primary"
+            ):
+                st.session_state.search_location = (gps_lat, gps_lng)
+                st.session_state.search_name = "현재 위치"
+                st.session_state.charger_search_requested = True
+                st.session_state.page = "⚡ 충전소"
+                st.rerun()
+        else:
+            st.info("위치 정보가 확인되면 주변 충전소를 검색할 수 있어요.")
 
 
     st.markdown("""
@@ -356,14 +390,54 @@ elif page == "⚡ 충전소":
 
     st.header("⚡ 주변 급속충전소")
 
-    search_name = st.session_state.get(
-        "search_name", "제주시"
-    )
-    lat, lng = st.session_state.get(
-        "search_location", REGIONS["제주시"]
+    # 홈에서 검색 버튼을 누른 경우, 홈의 좌표를 그대로 사용합니다.
+    home_requested = st.session_state.pop("charger_search_requested", False)
+    if home_requested:
+        st.session_state.charger_search_mode = "홈에서 설정한 위치"
+
+    st.markdown("#### 📍 어디에서 충전하고 싶으세요?")
+    search_mode = st.radio(
+        "검색 기준",
+        ["관광지 선택", "지역 선택", "홈에서 설정한 위치"],
+        horizontal=True,
+        key="charger_search_mode"
     )
 
-    st.caption(f"검색 기준: {search_name}")
+    selected_location = None
+    selected_name = None
+
+    if search_mode == "관광지 선택":
+        selected_spot = st.selectbox(
+            "방문할 관광지",
+            list(TOURIST_SPOTS.keys()),
+            index=None,
+            placeholder="관광지를 선택해주세요",
+            key="charger_tourist_spot"
+        )
+        if selected_spot is not None:
+            selected_location = TOURIST_SPOTS[selected_spot]
+            selected_name = selected_spot
+
+    elif search_mode == "지역 선택":
+        selected_region = st.selectbox(
+            "제주 지역",
+            list(REGIONS.keys()),
+            index=None,
+            placeholder="지역을 선택해주세요",
+            key="charger_region_select"
+        )
+        if selected_region is not None:
+            selected_location = REGIONS[selected_region]
+            selected_name = selected_region
+
+    else:
+        selected_location = st.session_state.get("search_location")
+        selected_name = st.session_state.get("search_name", "현재 위치")
+        if selected_location is None:
+            st.info("홈에서 관광지·지역·GPS 중 하나를 먼저 선택해 주세요.")
+
+    if selected_location is not None:
+        st.caption(f"📍 검색 기준: {selected_name}")
 
     radius = st.slider(
         "검색 반경 (직선거리 km)",
@@ -372,17 +446,43 @@ elif page == "⚡ 충전소":
         value=5
     )
 
-    api_key = st.secrets.get("EV_API_KEY", "")
+    search_clicked = st.button(
+        "🔍 주변 급속충전소 검색",
+        key="search_chargers",
+        use_container_width=True,
+        type="primary"
+    )
 
-    if not api_key:
-        st.error(
-            ".streamlit/secrets.toml에 "
-            "EV_API_KEY를 설정해주세요."
-        )
+    # 메뉴에서 직접 진입하면 버튼 클릭 전에는 API를 호출하지 않습니다.
+    # 홈에서 검색해 넘어온 첫 실행만 버튼 없이 자동으로 조회합니다.
+    if not search_clicked and not home_requested:
+        st.info("관광지나 지역을 선택한 뒤 검색 버튼을 눌러주세요.")
         st.stop()
 
+    if selected_location is None:
+        st.warning("검색할 관광지나 지역을 먼저 선택해 주세요.")
+        st.stop()
+
+    lat, lng = selected_location
+    # 홈에서 설정한 위치는 유지하고, 직접 검색한 위치만 갱신합니다.
+    if search_mode != "홈에서 설정한 위치":
+        st.session_state.search_location = selected_location
+        st.session_state.search_name = selected_name
+
+    # 충전소 API 인증키 불러오기
+    api_key = st.secrets.get("EV_API_KEY", "")
+
+    # 실시간 모드에서만 인증키 확인
+    if not demo_mode and not api_key:
+        st.error(
+            "충전소 API 인증키가 없습니다. "
+            "secrets.toml 설정을 확인해 주세요."
+        )
+        st.stop()
+        
     try:
         if demo_mode:
+            
             # 저장된 충전소 데이터 불러오기
             chargers_data, saved_at = load_charger_snapshot()
 
