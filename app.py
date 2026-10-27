@@ -357,9 +357,6 @@ if page == "🏠 홈":
         <strong>🌱 친환경 충전 권장 시간</strong>
         <p>실제 미래 기상예보와 전력수요
         예측값을 연결한 뒤 제공됩니다.</p>
-        <span class="gm-caption">
-            현재는 과거 데이터 기반 AI 분석 단계
-        </span>
     </div>
     """, unsafe_allow_html=True)
 
