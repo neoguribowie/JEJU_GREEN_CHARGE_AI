@@ -7,7 +7,7 @@ import joblib
 import numpy as np
 import pandas as pd
 
-from refresh_c005_forecast import prepare_features
+from refresh_c005_forecast import prepare_features, main as refresh_c005_main
 
 ROOT = Path(__file__).resolve().parent
 
@@ -32,11 +32,8 @@ C006_MODEL_PATH = ROOT / "models/curtailment_rf_c006.pkl"
 # ---------------------------------------
 print("STEP 1: 기상청 예보 수집 및 C005 갱신")
 
-subprocess.run(
-    [sys.executable, str(ROOT / "refresh_c005_forecast.py")],
-    cwd=ROOT,
-    check=True
-)
+# Run in the same process so the caller's timeout stops the entire pipeline.
+refresh_c005_main()
 
 # ---------------------------------------
 # 2. 기존 학습 모델 불러오기

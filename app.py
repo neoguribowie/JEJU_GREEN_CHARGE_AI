@@ -6,6 +6,7 @@ import folium
 from streamlit_folium import st_folium
 from streamlit_geolocation import streamlit_geolocation
 from charger_errors import describe_charger_error
+from forecast_refresh_support import run_integrated_refresh, ForecastRefreshError
 from chargers import (
     REGIONS,
     load_jeju_chargers,
@@ -766,21 +767,12 @@ elif page == "🌱 AI 충전 가이드":
         else:
             try:
                 with st.spinner("기상예보 수집 및 C005·D002·C006 통합 예측 중입니다. 잠시 기다려 주세요."):
-                    subprocess.run(
-                        [sys.executable, str(refresh_script)],
-                        cwd=str(PROJECT_ROOT),
-                        check=True,
-                        capture_output=True,
-                        timeout=180,
-                    )
-            except subprocess.TimeoutExpired:
-                st.error("예측 갱신 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.")
-            except (subprocess.CalledProcessError, OSError):
-                st.error(
-                    "예측 갱신에 실패했습니다. 기상청 API 연결·키 설정, "
-                    "저장된 C005·D002·C006 모델 및 실행 환경을 확인해 주세요. "
-                    "아래에는 기존 저장 결과가 표시됩니다."
-                )
+                    run_integrated_refresh(PROJECT_ROOT, sys.executable, timeout=180)
+            except ForecastRefreshError as refresh_error:
+                st.error(f"예측 갱신 실패 [{refresh_error.code}]")
+                st.info(refresh_error.message)
+                if refresh_error.code not in ("ROLLBACK_FAILED", "REFRESH_BUSY"):
+                    st.caption("기존 저장 결과를 유지합니다. 잠시 후 갱신을 다시 시도할 수 있습니다.")
             else:
                 st.cache_data.clear()
                 st.session_state.c005_refresh_success = True
