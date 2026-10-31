@@ -1,8 +1,11 @@
 
 import textwrap
+import subprocess
+import sys
 import folium
 from streamlit_folium import st_folium
 from streamlit_geolocation import streamlit_geolocation
+from charger_errors import describe_charger_error
 from chargers import (
     REGIONS,
     load_jeju_chargers,
@@ -16,6 +19,8 @@ from ai_dashboard import (
     render_power_prediction,
     render_model_comparison,
     render_future_risk_comparison,
+    CHARGING_RECOMMENDATION_THRESHOLD,
+    select_charging_recommendations,
 )
 from charger_demo import (
     save_charger_snapshot,
@@ -106,6 +111,15 @@ st.markdown("""
 
     /* 모바일 화면 */
     @media (max-width: 600px) {
+        h2 {
+            font-size: 1.5rem;
+            word-break: keep-all;
+            overflow-wrap: break-word;
+        }
+        h3 {
+            font-size: 1.25rem;
+            word-break: keep-all;
+        }
         .gm-hero h2 {
             font-size: 1.65rem;
             line-height: 1.35;
@@ -127,19 +141,20 @@ def load_csv(path):
     return pd.read_csv(path)
 
 
-WIND_PATH = Path(
+WIND_PATH = Path(__file__).resolve().parent / Path(
     "data/processed/wind_weather_2020_2023.csv"
 )
 
-CURTAILMENT_PATH = Path(
+CURTAILMENT_PATH = Path(__file__).resolve().parent / Path(
     "data/processed/curtailment_hourly_2021_2023.csv"
 )
 
-AI_PREDICTION_PATH = Path(
+AI_PREDICTION_PATH = Path(__file__).resolve().parent / Path(
     "results/curtailment_c004/C003_predictions_2023.csv"
 )
 
-FUTURE_RISK_PATH = Path(
+PROJECT_ROOT = Path(__file__).resolve().parent
+FUTURE_RISK_PATH = PROJECT_ROOT / Path(
     "results/curtailment_c005/future_risk_forecast.csv"
 )
 
@@ -161,10 +176,17 @@ pages = [
 st.markdown("## 🌿 Green Match")
 st.caption("제주 여행의 친환경 전기차 충전 파트너")
 
+def on_menu_change():
+    st.session_state.page = st.session_state.main_menu
+
+if st.session_state.get("main_menu") != st.session_state.page:
+    st.session_state.main_menu = st.session_state.page
+
 page = st.selectbox(
     "메뉴",
     pages,
-    index=pages.index(st.session_state.page)
+    key="main_menu",
+    on_change=on_menu_change,
 )
 st.session_state.page = page
 
@@ -245,7 +267,7 @@ if page == "🏠 홈":
             </div>
             <div class="gm-home-description">
                 AI 분석으로 충전을 검토할 시간대를 확인하고,
-                여행지 주변 급속충전소를 찾아보세요.
+                여행지 주변 급속충전소를 찾아보세요. 예약 기능은 제공하지 않습니다.
             </div>
             <div class="gm-steps">
                 <div class="gm-steps-label">서비스 이용 순서</div>
@@ -355,8 +377,8 @@ if page == "🏠 홈":
     st.markdown("""
     <div class="gm-card">
         <strong>🌱 친환경 충전 권장 시간</strong>
-        <p>실제 미래 기상예보와 전력수요
-        예측값을 연결한 뒤 제공됩니다.</p>
+        <p>기상예보 기반 C005 AI 위험 참고 점수로
+        충전을 검토할 시간대를 확인해 보세요.</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -381,9 +403,11 @@ elif page == "⚡ 충전소":
 
     demo_mode = st.toggle(
         "📂 저장 데이터 시연 모드",
-        value=False,
+        value=st.session_state.get("charger_demo_enabled", False),
         help="실시간 API 대신 사전에 저장한 충전소 정보를 사용합니다."
     )    
+
+    st.session_state.charger_demo_enabled = demo_mode
 
     st.header("⚡ 주변 급속충전소")
 
@@ -452,7 +476,9 @@ elif page == "⚡ 충전소":
 
     # 메뉴에서 직접 진입하면 버튼 클릭 전에는 API를 호출하지 않습니다.
     # 홈에서 검색해 넘어온 첫 실행만 버튼 없이 자동으로 조회합니다.
-    if not search_clicked and not home_requested:
+    search_identity = (selected_location, demo_mode)
+    previous_search = st.session_state.get("charger_result_identity")
+    if not search_clicked and not home_requested and previous_search != search_identity:
         st.info("관광지나 지역을 선택한 뒤 검색 버튼을 눌러주세요.")
         st.stop()
 
@@ -467,7 +493,12 @@ elif page == "⚡ 충전소":
         st.session_state.search_name = selected_name
 
     # 충전소 API 인증키 불러오기
-    api_key = st.secrets.get("EV_API_KEY", "")
+    api_key = ""
+    if not demo_mode:
+        try:
+            api_key = st.secrets.get("EV_API_KEY", "")
+        except FileNotFoundError:
+            pass
 
     # 실시간 모드에서만 인증키 확인
     if not demo_mode and not api_key:
@@ -507,14 +538,16 @@ elif page == "⚡ 충전소":
             with st.spinner("제주 충전소 정보를 조회하고 있어요..."):
                 chargers = load_jeju_chargers(api_key)
 
-            if not chargers.empty:
-                saved = save_charger_snapshot(
-                    chargers.to_dict("records")
-                )
-
-                if saved:
-                    st.success("✅ 충전소 시연 데이터 저장 완료!")
-            else:
+            if not chargers.empty and (search_clicked or home_requested):
+                try:
+                    saved = save_charger_snapshot(chargers.to_dict("records"))
+                except Exception as save_error:
+                    code, reason = describe_charger_error(save_error, "시연 데이터 저장")
+                    st.warning(f"시연 데이터 저장 실패 [{code}] · {reason} 실시간 검색 결과는 계속 표시합니다.")
+                else:
+                    if saved:
+                        st.success("✅ 충전소 시연 데이터 저장 완료!")
+            elif chargers.empty:
                 st.warning("API에서 충전소 데이터가 반환되지 않았습니다.")
 
         # 실시간 및 시연 모드에서 공통으로 실행
@@ -523,12 +556,13 @@ elif page == "⚡ 충전소":
         )
 
     except Exception as e:
-        st.error(f"충전소 조회 실패: {e}")
-        st.info(
-            "실시간 API 연결 또는 저장 데이터 처리 중 "
-            "문제가 발생했습니다."
-        )
+        error_code, reason = describe_charger_error(e)
+        st.error(f"충전소 조회 실패 [{error_code}]")
+        st.info(reason)
+        st.caption(f"오류 유형: {type(e).__name__} · 요청 URL과 API 키는 표시하지 않습니다.")
         st.stop()
+
+    st.session_state.charger_result_identity = search_identity
 
     if nearby.empty:
         st.warning(
@@ -705,6 +739,8 @@ elif page == "🌱 AI 충전 가이드":
 
     st.header("🌱 AI 친환경 충전 가이드")
 
+    # 이번 화면에서 날짜별 충전소 이동 버튼을 표시했는지 추적합니다.
+    charger_navigation_shown = False
 
     # ==========================================
     # EXP-C005 미래 기상예보 기반 시험 예측
@@ -717,12 +753,43 @@ elif page == "🌱 AI 충전 가이드":
         "아직 검증되지 않았습니다."
     )
 
+    if st.session_state.pop("c005_refresh_success", False):
+        st.success("같은 최신 기상예보로 C005·D002·C006 예측을 함께 갱신했습니다.")
+
     if st.button(
-        "🔄 저장된 예측 결과 다시 불러오기",
-        key="reload_c005"
+        "🔄 최신 기상예보로 예측 갱신",
+        key="refresh_c005"
     ):
-        st.cache_data.clear()
-        st.rerun()
+        refresh_script = PROJECT_ROOT / "refresh_all_forecasts.py"
+        if not refresh_script.exists():
+            st.error("통합 예측 갱신 스크립트(refresh_all_forecasts.py)가 없습니다.")
+        else:
+            try:
+                with st.spinner("기상예보 수집 및 C005·D002·C006 통합 예측 중입니다. 잠시 기다려 주세요."):
+                    subprocess.run(
+                        [sys.executable, str(refresh_script)],
+                        cwd=str(PROJECT_ROOT),
+                        check=True,
+                        capture_output=True,
+                        timeout=180,
+                    )
+            except subprocess.TimeoutExpired:
+                st.error("예측 갱신 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.")
+            except (subprocess.CalledProcessError, OSError):
+                st.error(
+                    "예측 갱신에 실패했습니다. 기상청 API 연결·키 설정, "
+                    "저장된 C005·D002·C006 모델 및 실행 환경을 확인해 주세요. "
+                    "아래에는 기존 저장 결과가 표시됩니다."
+                )
+            else:
+                st.cache_data.clear()
+                st.session_state.c005_refresh_success = True
+                st.rerun()
+
+    st.caption(
+        "최신 갱신은 저장된 C005·D002·C006 모델을 같은 기상예보로 함께 갱신하며 재학습하지 않습니다. "
+        "같은 기상예보 발표 기준이면 결과가 같을 수 있습니다."
+    )
 
     if not FUTURE_RISK_PATH.exists():
         st.warning(
@@ -817,7 +884,11 @@ elif page == "🌱 AI 충전 가이드":
                 st.subheader("시간별 AI 위험 점수")
 
                 st.line_chart(
-                    day.set_index("hour")[["risk_score"]]
+                    day.set_index("hour")[["risk_score"]].rename(
+                        columns={"risk_score": "C005 AI 위험 점수 (전체)"}
+                    ).assign(**{
+                        "집중 추천 기준 (0.15)": CHARGING_RECOMMENDATION_THRESHOLD
+                    })
                 )
 
                 st.caption(
@@ -826,89 +897,65 @@ elif page == "🌱 AI 충전 가이드":
                     "실제 잉여전력량이나 탄소저감량이 아닙니다."
                 )
 
-                # 선택한 날짜에서 점수가 높은 시간 3개
-                top_hours = day.sort_values(
-                    ["risk_score", "forecast_datetime"],
-                    ascending=[False, True]
-                ).head(3)
+                recommended_hours = select_charging_recommendations(day)
 
-                                # 관광객용 AI 충전 안내 카드
-                max_score = day["risk_score"].max()
+                st.caption(
+                    "그래프는 선택 날짜의 전체 AI 위험 점수를 유지합니다. "
+                    "집중 추천은 낮 10~16시 후보 중 점수 0.15 이상인 시간만 "
+                    "점수순으로 최대 3개 선정합니다."
+                )
+                st.caption(
+                    "관광객 대상 집중 추천에는 탐색적 절충안 기준 0.15를 적용합니다. "
+                    "모델의 출력제어 발생 분류 임계값 0.05와는 별도 기준입니다."
+                )
 
-                if max_score >= 0.05:
-                    recommended_hours = top_hours[
-                        top_hours["risk_score"] >= 0.05
-                    ].copy()
-
-                    hour_labels = [
-                        t.strftime("%H:%M")
-                        for t in recommended_hours[
-                            "forecast_datetime"
-                        ]
-                    ]
-
-                    time_text = ", ".join(hour_labels)
-
-                    st.success(
-                        "🌿 **낮 시간 충전을 검토해 보세요!**\n\n"
-                        f"선택한 날짜의 AI 분석에서 "
-                        f"**{time_text}** 시간대가 "
-                        "상대적으로 높은 출력제어 위험 점수를 보였어요.\n\n"
-                        "여행 일정에 맞는다면 주변 급속충전소를 "
-                        "확인해 보세요."
+                if recommended_hours.empty:
+                    st.info(
+                        "☀️ **집중 추천 시간 없음**\n\n"
+                        "선택한 날짜의 낮 10~16시에는 추천 기준을 충족하는 "
+                        "시간이 없습니다. 필요한 시간에 일반 충전소 검색을 이용하세요."
                     )
-
+                    if st.button(
+                        "⚡ 일반 급속충전소 검색하기",
+                        key="ai_guide_to_chargers",
+                        use_container_width=True,
+                        type="primary"
+                    ):
+                        st.session_state.page = "⚡ 충전소"
+                        st.rerun()
                 else:
-                    st.info(
-                        "☀️ **오늘은 일반 충전 안내를 확인해 보세요.**\n\n"
-                        "선택한 날짜에는 AI 위험 점수가 "
-                        "설정한 기준보다 높은 시간이 없어요.\n\n"
-                        "필요한 시간에 주변 급속충전소를 "
-                        "이용할 수 있어요."
+                    time_text = ", ".join(
+                        t.strftime("%H:%M")
+                        for t in recommended_hours["forecast_datetime"]
                     )
+                    st.success(
+                        "🌿 **여행 일정에 맞춰 낮 시간 충전을 추천해요!**\n\n"
+                        f"집중 추천 시간: **{time_text}**\n\n"
+                        "여행 일정과 충전 필요량에 맞는다면 주변 급속충전소를 확인해 보세요."
+                    )
+                    st.subheader("🌿 집중 추천 시간 TOP 3 (최대)")
+                    for rank, (_, item) in enumerate(
+                        recommended_hours.iterrows(), start=1
+                    ):
+                        hour_text = item["forecast_datetime"].strftime("%H:%M")
+                        st.markdown(
+                            f"**{rank}. {hour_text} · "
+                            f"AI 위험 점수 {item['risk_score']:.2f}**"
+                        )
 
+                    if st.button(
+                        "⚡ 주변 급속충전소 찾기",
+                        key="ai_guide_to_chargers",
+                        use_container_width=True
+                    ):
+                        st.session_state.page = "⚡ 충전소"
+                        st.rerun()
+
+                charger_navigation_shown = True
                 st.caption(
-                    "※ AI 분석은 참고 정보이며, "
-                    "실제 잉여전력 발생이나 할인 혜택을 "
-                    "보장하지 않습니다."
-                )
-
-                st.caption(
-                    "여행 일정에 맞는 시간대를 골랐다면, "
-                    "이제 가까운 급속충전소를 찾아보세요!"
-                )
-
-                if st.button(
-                    "⚡ 주변 급속충전소 찾기",
-                    key="ai_guide_to_chargers",
-                    use_container_width=True
-                ):
-                    st.session_state.page = "⚡ 충전소"
-                    st.rerun()
-
-
-                st.subheader("🌿 우선 검토할 시간대")
-
-                for _, item in top_hours.iterrows():
-                    hour_text = item[
-                        "forecast_datetime"
-                    ].strftime("%H:%M")
-
-                    st.markdown(
-                        f"**{hour_text} · "
-                        f"AI 위험 점수 {item['risk_score']:.2f}**"
-                    )
-
-                if (day["risk_score"] < 0.05).all():
-                    st.info(
-                        "선택한 날짜에는 기존 임계값 "
-                        "0.05 이상인 시간이 없습니다."
-                    )
-
-                st.info(
-                    "위 시간대는 충전 검토용 참고 정보입니다. "
-                    "실제 친환경 효과와 플러스DR 발령 여부는 "
-                    "별도로 확인해야 합니다."
+                    "※ AI 점수는 실제 발생 확률로 보정된 값이 아닙니다. "
+                    "집중 추천은 실제 출력제어·잉여전력 발생, 플러스DR 발령 "
+                    "또는 할인 혜택을 보장하지 않습니다."
                 )
 
     st.divider()
@@ -1042,23 +1089,21 @@ elif page == "🌱 AI 충전 가이드":
     # 충전소 탐색 화면으로 이동
     # ====================================
     
-    st.divider()
-
-    st.subheader("🚗 실제 여행 중 충전하려면")
-
-    st.write(
-        "현재는 AI 미래 예보 대신 "
-        "실시간 급속충전소 정보를 기준으로 안내합니다."
-    )
-
-    if st.button(
-        "⚡ 주변 충전소 찾기",
-        key="ai_go_chargers",
-        use_container_width=True,
-        type="primary"
-    ):
-        st.session_state.page = "⚡ 충전소"
-        st.rerun()
+    if not charger_navigation_shown:
+        st.divider()
+        st.subheader("🚗 실제 여행 중 충전하려면")
+        st.write(
+            "집중 추천 시간 유무와 관계없이 "
+            "실시간 급속충전소 정보를 검색할 수 있습니다."
+        )
+        if st.button(
+            "⚡ 주변 충전소 찾기",
+            key="ai_go_chargers",
+            use_container_width=True,
+            type="primary"
+        ):
+            st.session_state.page = "⚡ 충전소"
+            st.rerun()
 
 
 # ====================================
@@ -1090,7 +1135,7 @@ elif page == "💰 할인":
         "기본 충전요금 (원/kWh)",
         min_value=0.0,
         max_value=1000.0,
-        value=348.4,
+        value=325.6,
         step=1.0
     )
 

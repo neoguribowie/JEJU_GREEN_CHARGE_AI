@@ -1,0 +1,2 @@
+model,threshold,max_daily_recommendations,total_days,recommended_days,recommended_hours,correct_hours,precision,daytime_baseline,lift,hit_rate_recommended_days
+C005,0.05,3,365,225,599,280,0.4674457429048414,0.21252446183953033,2.199491479045801,0.5022222222222222

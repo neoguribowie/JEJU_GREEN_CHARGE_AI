@@ -10,6 +10,30 @@ D002 = ROOT / "results/demand_d002"
 C005 = ROOT / "results/curtailment_c005"
 C006 = ROOT / "results/curtailment_c006"
 
+# 관광객 집중 추천 정책. 모델 분류 임계값 0.05와 별도로 적용한다.
+CHARGING_RECOMMENDATION_THRESHOLD = 0.15
+
+
+def select_charging_recommendations(forecast):
+    """날짜별 10~16시, 기준 이상인 시간만 점수순 최대 3개 선택."""
+    candidates = forecast.copy()
+    candidates["forecast_datetime"] = pd.to_datetime(
+        candidates["forecast_datetime"], errors="coerce"
+    )
+    candidates["risk_score"] = pd.to_numeric(
+        candidates["risk_score"], errors="coerce"
+    )
+    candidates = candidates.dropna(subset=["forecast_datetime", "risk_score"])
+    candidates = candidates[
+        candidates["forecast_datetime"].dt.hour.between(10, 16)
+        & candidates["risk_score"].ge(CHARGING_RECOMMENDATION_THRESHOLD)
+    ].sort_values(
+        ["risk_score", "forecast_datetime"], ascending=[False, True]
+    ).drop_duplicates("forecast_datetime")
+    return candidates.groupby(
+        candidates["forecast_datetime"].dt.date, sort=True
+    ).head(3).copy()
+
 
 def read_csv(path):
     if not path.exists():

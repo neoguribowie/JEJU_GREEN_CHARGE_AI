@@ -4,8 +4,10 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import json
+import os
+import tempfile
 
-SAVE_PATH = Path("data/demo/jeju_chargers_snapshot.json")
+SAVE_PATH = Path(__file__).resolve().parent / "data/demo/jeju_chargers_snapshot.json"
 
 
 def save_charger_snapshot(stations):
@@ -23,13 +25,16 @@ def save_charger_snapshot(stations):
         "stations": stations
     }
 
-    with open(SAVE_PATH, "w", encoding="utf-8") as f:
-        json.dump(
-            payload, f,
-            ensure_ascii=False,
-            indent=2,
-            default=str
-        )
+    # Replace only after a complete write; preserve the last good snapshot on failure.
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=SAVE_PATH.parent, suffix=".tmp", delete=False) as f:
+            temp_path = Path(f.name)
+            json.dump(payload, f, ensure_ascii=False, indent=2, default=str)
+        os.replace(temp_path, SAVE_PATH)
+    finally:
+        if temp_path is not None and temp_path.exists():
+            temp_path.unlink()
 
     return True
 

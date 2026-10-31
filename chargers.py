@@ -3,6 +3,8 @@ import math
 import requests
 import pandas as pd
 import streamlit as st
+import xml.etree.ElementTree as ET
+from charger_errors import ChargerAPIError, provider_error
 
 API_URL = (
     "https://apis.data.go.kr/"
@@ -61,15 +63,20 @@ def load_jeju_chargers(api_key):
         try:
             data = response.json()
         except ValueError:
-            raise RuntimeError(
-                "API가 JSON을 반환하지 않았습니다. "
-                "인증키 또는 응답 형식을 확인하세요."
-            )
+            # The gateway may return XML even when JSON was requested.
+            try:
+                xml = ET.fromstring(response.content)
+            except ET.ParseError:
+                raise ChargerAPIError("NON_JSON_RESPONSE", "충전소 API가 JSON 대신 다른 형식으로 응답했습니다. 잠시 후 다시 검색해 주세요.") from None
+            code = xml.findtext(".//returnReasonCode") or xml.findtext(".//resultCode")
+            if code:
+                raise provider_error(code) from None
+            raise ChargerAPIError("XML_RESPONSE", "충전소 API가 예상하지 못한 XML 응답을 반환했습니다.") from None
 
-        if str(data.get("resultCode", "00")) != "00":
-            raise RuntimeError(
-                f"API 오류: {data.get('resultMsg', data)}"
-            )
+        if not isinstance(data, dict):
+            raise ChargerAPIError("INVALID_RESPONSE", "충전소 API 응답 구조가 예상과 다릅니다.")
+        if str(data.get("resultCode", "00")) not in ("00", "0"):
+            raise provider_error(data.get("resultCode"))
 
         items = data.get("items") or {}
         batch = items.get("item", []) if isinstance(items, dict) else []
@@ -97,14 +104,16 @@ def load_jeju_chargers(api_key):
     missing = [c for c in required if c not in df.columns]
 
     if missing:
-        raise RuntimeError(
-            f"API 필수 컬럼 누락: {missing}"
-        )
+        raise ChargerAPIError("MISSING_COLUMNS", "충전소 API 응답에 검색에 필요한 항목이 없습니다.")
 
     for col in ["lat", "lng", "output"]:
         df[col] = pd.to_numeric(
             df[col], errors="coerce"
         )
+
+    for col in ["addr", "statUpdDt"]:
+        if col not in df.columns:
+            df[col] = "정보 없음"
 
     # 급속충전기 기준: 정격출력 50kW 이상
     df = df[

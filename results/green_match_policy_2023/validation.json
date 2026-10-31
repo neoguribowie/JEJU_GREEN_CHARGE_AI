@@ -1,0 +1,25 @@
+{
+  "joined_rows": 8760,
+  "prediction_target_label_mismatches": 0,
+  "wind_event_mismatches": 0,
+  "wind_mwh": 26197.0,
+  "raw_missing_hours": 5952,
+  "recommendation_hours": 362,
+  "no_recommendation_days": 222,
+  "recommendation_day_counts": {
+    "0": 222,
+    "1": 23,
+    "2": 21,
+    "3": 99
+  },
+  "app_function_parity": true,
+  "hourly_capacity_and_daily_demand_checks": true,
+  "input_sha256": {
+    "C:\\Users\\Magic COM\\OneDrive - pusan.ac.kr\\JEJU_GREEN_CHARGE_AI\\ai_dashboard.py": "6a3ae2e15c948d6ddaff0cfc0dddfb79c420f4fe2d793509b7d8e9bb1e7c1e0b",
+    "C:\\Users\\Magic COM\\OneDrive - pusan.ac.kr\\JEJU_GREEN_CHARGE_AI\\refresh_c005_forecast.py": "dc7a1b7253c34598ef1ff62026e79f6f835cbda6c351a7de6ddee8694a55179d",
+    "C:\\Users\\Magic COM\\OneDrive - pusan.ac.kr\\JEJU_GREEN_CHARGE_AI\\prepare_curtailment.py": "3ce2c843536b4d02c19a8f61f3eca80092ff6d0ac0b27f51d55c9b18860268c9",
+    "C:\\Users\\Magic COM\\OneDrive - pusan.ac.kr\\JEJU_GREEN_CHARGE_AI\\data\\raw\\curtailment\\제주 풍력 출력제어횟수 및 제어량.csv": "db64b5f9b478e43877144af6ca9b01d11b8d8d01bfb506ea308372b21b430509",
+    "C:\\Users\\Magic COM\\OneDrive - pusan.ac.kr\\JEJU_GREEN_CHARGE_AI\\data\\processed\\curtailment_hourly_2021_2023.csv": "dbe304767ed0aacdc8c8a0080251f5c88b1cd992278864b0e795b318d8088529",
+    "C:\\Users\\Magic COM\\OneDrive - pusan.ac.kr\\JEJU_GREEN_CHARGE_AI\\results\\curtailment_c005\\predictions_2023.csv": "099ef34a4d4edb40a53d2c7fbb54dfe4978b29c4fea988e6af737ccc167db502"
+  }
+}
